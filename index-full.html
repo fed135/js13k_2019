@@ -1,0 +1,669 @@
+<!--
+    I got pressed for time near the end, thus I never cleaned up the code.
+    Sorry for the mess.
+-->
+<head>
+    <title>JS13k - Puzzle from hell</title>
+    <meta 
+    name="monetization" 
+    content="$coil.xrptipbot.com/0rB1feYAQASBWA61heCRdA">
+</head>
+
+<h1 style="text-align:center;padding-top:25px;">Puzzle from Hell</h1>
+
+<!-- Puzzle size sliders -->
+Width<input type="range" min="1" max="30" value="12" id="xsize"><div id="xcounter"></div><br />
+Height<input type="range" min="1" max="30" value="8" id="ysize"><div id="ycounter"></div>
+
+<!-- Win screen -->
+<div id="ws" style="position:fixed;top:0px;margin:0px;width:100%;height:100%;background-color:rgba(200,200,100,0.5);color:#444;text-align:center;display:none">
+<h1>YOU WON!</h1>
+<canvas id="art" style="max-width: 90%;max-height: calc(90% - 100px);border:1px solid black"></canvas>
+<br />
+<button style="font-size:2em" onclick="restartGame()">Do it again!</button>
+</div>
+
+<!-- Intro screen -->
+<div id="intro" style="position:relative;margin:0px auto;width:50%;height:50%;background-color:white;color:#444;text-align:center;padding-top:50px">
+<p>You think you have patience?</p>
+<p>Put it to the test against this
+puzzle.</p>
+<p>Thing is, you can only see the <p style="font-weight:bold;display:inline">BACK</p> of the pieces!</p>
+<button style="font-size:2em" onclick="hideIntro()">Oh, crap...</button>
+</div>
+
+<!-- Main canvas -->
+<canvas id="canvas" style="margin:0px auto;display:none;">Your browser does not support canvas, sorry.</canvas>
+<script>
+// Setup ------------------------------------------------------------------------------------------
+
+const a = document.getElementById('canvas');
+const c = a.getContext('2d');
+document.body.style = 'background-color:#dfd;font-family: arial, sans-serif;font-size:1.3em'; // Comic Sans MS, Comic Sans, Chalkboard SE, Comic Neue, cursive;
+const winScreen = document.getElementById('ws');
+
+// Configs ----------------------------------------------------------------------------------------
+
+const rangeX = document.getElementById('xsize');
+const rangeY = document.getElementById('ysize');
+const counterX = document.getElementById('xcounter');
+const counterY = document.getElementById('ycounter');
+let conf = { w: rangeX.value, h: rangeY.value };
+let t = 0;
+
+// Check for stored configs in the url
+if (window.location.hash) {
+    try {
+        conf = JSON.parse(decodeURIComponent(window.location.hash.substring(1)));
+    }
+    catch(e) {}
+}
+
+// Check if user is a coil supporter
+const isCoilSupporter = document.monetization && ['pending', 'started'].includes(document.monetization.state);
+
+counterX.innerHTML = conf.w;
+counterY.innerHTML = conf.h;
+rangeX.value = conf.w;
+rangeY.value = conf.h;
+
+let currInstance;
+
+// Poll for puzzle size slider changes
+setInterval(() => {
+    if ((rangeX.value != conf.w || rangeY.value != conf.h) && !mouse.down) {
+        conf.w = rangeX.value;
+        conf.h = rangeY.value;
+        counterX.innerHTML = conf.w;
+        counterY.innerHTML = conf.h;
+        window.location.hash = JSON.stringify(conf);
+        newGame();
+    }
+}, 1000);
+
+function newGame() {
+    currInstance && currInstance.kill(); // Force kill
+    currInstance = puzzleGame(conf);
+    currInstance.start();
+}
+
+// Puzzle piece size configs (pixels)
+const pieceSize = 100;
+const nippleSize = 20;
+const edgeSize = 200;
+const padding = 30;
+
+let pieces;
+
+// States (Each piece's status is managed by a FSM)
+const STATUS = {
+    init: 0, // Intro anim
+    pick: 1, // Picking up
+    hold: 2, // Holding
+    drop: 3, // Dropping
+    lock: 4, // In right spot
+    rest: 5, // Ready to be picked
+};
+
+// Controls ---------------------------------------------------------------------------------------
+
+const mouse = {
+    x:0,
+    y:0,
+    down: false,
+    target: null,
+};
+
+function restartGame() {
+    winScreen.style.display = 'none';
+    newGame();
+}
+
+
+function handleMouseMove(evt) {
+    mouse.x = evt.offsetX;
+    mouse.y = evt.offsetY;
+}
+
+function handleUnclick() {
+    mouse.down = false;
+    if (mouse.target) {
+        mouse.target.status = STATUS.drop;
+        pieces.push(mouse.target);
+    }
+    mouse.target = null;
+}
+
+function handleClick() {
+    mouse.down = true;
+    const matches = pieces.reduce((acc, p, i) => {
+        if (checkCollision(mouse, p.coord) && p.status === STATUS.rest) acc.push(i);
+        return acc;
+    }, []);
+
+    if (matches.length > 0) {
+        mouse.target = pieces.splice(matches[matches.length - 1], 1)[0];
+        mouse.target.status = STATUS.pick;
+    }
+}
+
+function hideIntro() {
+    document.getElementById('intro').style.display = 'none';
+    a.style.display = 'block';
+    newGame();
+}
+
+function checkCollision(a, b) {
+    // Assumes it's always a single point coord a in a piece-size object b
+    return (
+        (a.x >= b.x + nippleSize) &&
+        (a.x <= b.x + pieceSize - nippleSize) &&
+        (a.y >= b.y + nippleSize) &&
+        (a.y <= b.y + pieceSize - nippleSize)
+    );
+}
+
+a.addEventListener('mousemove', handleMouseMove);
+a.addEventListener('mouseleave', handleUnclick);
+a.addEventListener('mousedown', handleClick);
+a.addEventListener('mouseup', handleUnclick);
+
+function rollNipple() {
+    return Math.floor(Math.random() * 2) + 1;
+}
+
+function rollScale() {
+    const sideRoll = Math.random() * 2 - 1;
+    return { x: sideRoll < 0 ? Math.random() * 2 - 1 : 1, y: sideRoll < 0 ? 1 : Math.random() * 2 - 1 };
+}
+
+function rollRotation() {
+    return Math.random() * (2 * Math.PI) - Math.PI;
+}
+
+function rollRange(min, max) {
+    return Math.random() * (max - min) + min;
+}
+
+/* Sounds --------------------------------------------------------------------*/
+
+// Periodic wave shape
+var wave = [
+    0,
+    -0.6,
+    0.7,
+    -0.1,
+    0.1,
+    0,
+  ];
+
+const ac = new AudioContext();
+const baseFreq = 50;
+const pieceGain = ac.createGain();
+pieceGain.connect(ac.destination);
+
+// Initialize -------------------------------------------------------------------------------------
+
+function puzzleGame(co) {
+    let forceKill = false;
+    const pictureWidth = co.w;
+    const pictureHeight = co.h;
+
+    const totalX = pictureWidth * (pieceSize - nippleSize * 2) + edgeSize * 2 + padding * 4;
+    const totalY = pictureHeight * (pieceSize - nippleSize * 2) + edgeSize * 2 + padding * 4;
+
+    // Create picture
+    const picture = createPicture();
+
+    // Live pieces
+    pieces = createPuzzle();
+
+    // Create puzzle
+    function createPuzzle() {
+        const acc = [];
+        for (let y = 0; y < pictureHeight; y++) {
+            for (let x = 0; x < pictureWidth; x++) {
+                // Side options: 0 = flat, 1 = inwards 2 = outwards
+                acc.push(createPiece(x, y, [
+                    // Top
+                    y === 0 ? 0 : getNippleMatch(acc, x, y - 1, 2),
+                    // Right
+                    x === pictureWidth - 1 ? 0 : getNippleMatch(acc, x + 1, y, 3),
+                    // Bottom
+                    y === pictureHeight - 1 ? 0 : getNippleMatch(acc, x, y + 1, 0),
+                    // Left
+                    x === 0 ? 0 : getNippleMatch(acc, x - 1, y, 1),
+                ]));
+            }
+        }
+        return acc;
+    }
+
+    // Figure out next matching piece
+    function getNippleMatch(map, x, y, side) {
+        const piece = map.find(piece => piece.x === x && piece.y === y);
+        return (piece === undefined) ? rollNipple() : piece.sides[side] === 1 ? 2 : 1;
+    }
+
+    // Generate random art
+    function createPicture() {
+        const buffer = document.getElementById('art');
+        buffer.width = pictureWidth * pieceSize;
+        buffer.height = pictureHeight * pieceSize;
+        const context = buffer.getContext('2d');
+        renderArt({ context });
+        return buffer;
+    }
+
+    // Create the different layers of every piece
+    function createPiece(x, y, sides) {
+        const live = new OffscreenCanvas(pieceSize, pieceSize);
+        const ref = new OffscreenCanvas(pieceSize, pieceSize);
+        const back = new OffscreenCanvas(pieceSize, pieceSize);
+        const shadow = new OffscreenCanvas(pieceSize, pieceSize);
+        const pCtx = live.getContext('2d');
+
+        // Draw picture and create shape
+        puzzlePath(pCtx, sides);
+        
+        pCtx.fillStyle = 'red';
+        pCtx.fill();
+        pCtx.stroke();
+        pCtx.globalCompositeOperation = 'source-in';
+        pCtx.drawImage(picture, x * (pieceSize - nippleSize * 2), y * (pieceSize - nippleSize * 2), pieceSize, pieceSize, 0, 0, pieceSize, pieceSize);
+        //pCtx.shadowBlur=2;
+        //pCtx.shadowColor='black';
+
+        const rCtx = ref.getContext('2d');
+        puzzlePath(rCtx, sides);
+        rCtx.fillStyle = 'rgba(200,200,200,0.5)';
+        rCtx.setLineDash([12, 8]);
+        rCtx.lineWidth = 2;
+        rCtx.strokeStyle = '#444';
+        rCtx.fill();
+        rCtx.stroke();
+
+        const sCtx = shadow.getContext('2d');
+        puzzlePath(sCtx, sides);
+        sCtx.fillStyle = 'rgba(0,0,0,0.1)';
+        sCtx.shadowColor='black';
+        sCtx.shadowBlur=5;
+        sCtx.fill();
+
+        const bCtx = back.getContext('2d');
+        puzzlePath(bCtx, sides);
+        bCtx.shadowColor='rgba(0,0,0,0.75)';
+        bCtx.shadowBlur=10;
+
+        bCtx.stroke();
+        bCtx.shadowColor='rgba(0,0,0,0)';
+
+        bCtx.globalCompositeOperation = 'destination-in';
+        bCtx.fill();
+
+        bCtx.globalCompositeOperation='destination-over';
+        bCtx.fillStyle = 'tan';
+        bCtx.fill();
+        bCtx.stroke();
+
+        // OSC
+        const sound = ac.createOscillator();
+        setTimeout(() => {
+            sound.setPeriodicWave(ac.createPeriodicWave(Float32Array.from(wave), Float32Array.from(wave.map(a=>0))));
+            sound.start(0);
+        }, 0);
+
+        // Insert puzzle entity specifics
+        return {
+            sides,
+            coord: rollCoord(),
+            recall: null,
+            y,
+            x,
+            sound,
+            scale: rollScale(),
+            rotation: rollRotation(),
+            status: STATUS.init,
+            img: { live, ref, back, shadow }
+        };
+    }
+
+    function rollCoord() {
+        // 4 quadrants
+        const roll = `${rollNipple()}${rollNipple()}`;
+        const quads = {
+            '11': [rollRange(0, edgeSize - pieceSize), rollRange(0, totalY - pieceSize)], // Full column left
+            '12': [rollRange(totalX - edgeSize, totalX - pieceSize), rollRange(0, totalY - pieceSize)], // Full column right
+            '21': [rollRange(pieceSize, totalX - edgeSize), rollRange(0, edgeSize - pieceSize)], // Top
+            '22': [rollRange(pieceSize, totalX - edgeSize), rollRange(totalY - edgeSize, totalY - pieceSize)], // Top
+        };
+
+        return { x: quads[roll][0], y: quads[roll][1], z: Math.random() * 40 + 20 };
+    }
+
+    // Cut out the shape of a piece based on it's sides config (cut a side, then rotate until all sides are cut)
+    function puzzlePath(ctx, sides) {
+        ctx.beginPath();
+        let i = 0;
+        while(i < 4) nipplePath(ctx, i++, sides);
+        ctx.closePath();
+    }
+
+    // Offset for the picture
+    function getSideOffset(sides, offset) {
+        return [3].includes(sides[(4 + offset) % 4]) ? 0 : nippleSize;
+    }
+
+    // Cut out the path of a single piece
+    function nipplePath(ctx, index, sides) {
+        const quarterTurn = Math.PI * 0.5;
+        let aHandle = [getSideOffset(sides, index - 1), getSideOffset(sides, index)];
+        let bHandle = [pieceSize - getSideOffset(sides, index + 1), getSideOffset(sides, index)];
+
+        ctx.save();
+        ctx.translate(pieceSize * 0.5, pieceSize * 0.5);
+        ctx.rotate(quarterTurn * index);
+        ctx.translate(-pieceSize * 0.5, -pieceSize * 0.5);
+
+        switch(sides[index]) {
+            case 1:
+                // Inwards nipple
+                ctx.lineTo(pieceSize * 0.5 - nippleSize * 0.25, bHandle[1]);
+                ctx.bezierCurveTo(
+                    pieceSize * 0.5 - nippleSize, bHandle[1] + nippleSize,
+                    pieceSize * 0.5 + nippleSize, bHandle[1] + nippleSize,
+                    pieceSize * 0.5 + nippleSize * 0.25, bHandle[1]
+                );
+                break;
+            case 2:
+                // Outwards nipple
+                ctx.lineTo(pieceSize * 0.5 - nippleSize * 0.25, bHandle[1]);
+                ctx.bezierCurveTo(
+                    pieceSize * 0.5 - nippleSize, bHandle[1] - nippleSize,
+                    pieceSize * 0.5 + nippleSize, bHandle[1] - nippleSize,
+                    pieceSize * 0.5 + nippleSize * 0.25, bHandle[1]
+                );
+                break;
+        }
+        ctx.lineTo(bHandle[0], bHandle[1]);
+        ctx.restore();
+    }
+
+    // Game functions ---------------------------------------------------------------------------------
+
+    function draw() {
+        if (forceKill) return false;
+        setTimeout(draw, 16); // 60 fps lock
+
+        a.width = totalX;
+        a.height = totalY;
+        a.style.width = `${totalX}px`;
+        a.style.height = `${totalY}px`;
+        t++;
+        if (winScreen.style.display === 'block') winScreen.style.backgroundColor=`hsl(${t*4},75%,95%)`;
+
+        pieces.forEach(renderRef);
+        if (mouse.target) renderRef(mouse.target);
+        pieces.forEach(update);
+        if (mouse.target) update(mouse.target);
+    }
+
+    // Piece update loop uses the piece's state machine
+    function update(piece) {
+        switch(piece.status) {
+                case 0: // init
+                    if (piece.coord.z >= 2) {
+                        // Falling
+                        // Calculate animation delta between current state and desired state
+                        const xSpeed = piece.scale.x / piece.coord.z;
+                        const ySpeed = piece.scale.y / piece.coord.z;
+                        if (piece.scale.x !== -1) piece.scale.x = piece.scale.x - (xSpeed * Math.abs(xSpeed));
+                        if (piece.scale.y !== 1) piece.scale.y = piece.scale.y + (ySpeed * Math.abs(ySpeed));
+                        //piece.rotation = piece.rotation - piece.rotation / piece.coord.z;
+                        piece.coord.z--;
+                    }
+                    if (piece.coord.z < 2) {
+                        playSound(piece);
+
+                        //Snap
+                        piece.coord.z = 1;
+                        piece.scale.x = isCoilSupporter ? 1 : -1;
+                        piece.scale.y = 1;
+                        // piece.rotation = 0;
+                        // TODO: Make a sound ?
+                        piece.status = STATUS.rest;
+                    }
+                    break;
+                case 1: // pick
+                    piece.scale.x = piece.scale.y = 1.2;
+                    piece.status = STATUS.hold;
+                    piece.recall = { ...piece.coord };
+                    piece.recallRotation = piece.rotation;
+                    piece.rotation = 0;
+                    playSound(piece);
+                    
+                    break;
+                case 2: // hold
+                    piece.coord.x = mouse.x - pieceSize * 0.5;
+                    piece.coord.y = mouse.y - pieceSize * 0.5;
+                    break;
+                case 3: // drop
+                    const targetCoord = {
+                        x: restPosition(piece.x),
+                        y: restPosition(piece.y),
+                        z: 1
+                    };
+                    
+                    if (checkCollision(mouse, targetCoord)) {
+                        piece.status = STATUS.lock;
+                        piece.coord = targetCoord;
+                        piece.scale.x = piece.scale.y = 1;
+                        checkWinScenario();
+                        playSound(piece);
+                    }
+                    else {
+                        const isOverBoard = (
+                            (piece.coord.x > edgeSize && piece.coord.x < totalX - edgeSize) &&
+                            (piece.coord.y > edgeSize && piece.coord.y < totalY - edgeSize)
+                        );
+                        if (isOverBoard) {
+                            piece.coord = piece.recall;
+                            piece.rotation = piece.recallRotation;
+                        } else {
+                            piece.coord.x = mouse.x - pieceSize * 0.5;
+                            piece.coord.y = mouse.y - pieceSize * 0.5;
+                        }
+                        piece.scale.x = isCoilSupporter ? 1 : -1;
+                        piece.scale.y = 1;
+                        piece.status = STATUS.rest;
+                        playSound(piece);
+                    }
+                    break;
+                case 4: // lock
+                    break;
+                case 5: // rest
+                    break;
+                    
+            }
+
+            // interpolate
+            renderPiece(piece);
+    }
+
+    function playSound(piece) {
+        piece.sound.frequency.value = baseFreq + Math.random() * 20;
+        piece.sound.connect(pieceGain);
+        setTimeout(() => piece.sound.disconnect(), 20);
+    }
+
+    // The final pixel coordinates of where the piece needs to go
+    function restPosition(coord) {
+        return edgeSize + (coord * (pieceSize - nippleSize * 2)) + padding * 2;
+    }
+
+    // Renders the reference cutout
+    function renderRef(piece) {
+        c.drawImage(piece.img.ref, restPosition(piece.x), restPosition(piece.y));
+    } 
+
+    // Renders the piece's layers, in function of it's rotation and status
+    function renderPiece(piece) {
+        c.save();
+        c.translate(piece.coord.x + pieceSize * 0.5, piece.coord.y + pieceSize * 0.5);
+        c.rotate(piece.rotation);
+        c.scale(piece.scale.x, piece.scale.y);
+
+        if (piece.status === STATUS.hold) c.drawImage(piece.img.shadow, -pieceSize * 0.5, - pieceSize * 0.4, pieceSize, pieceSize);
+
+        // Positive scale = top side up
+        const order = (piece.scale.x > 0 && piece.scale.y > 0) ? ['back', 'live'] : ['live', 'back'];
+        c.drawImage(piece.img[order[0]], -pieceSize * 0.5, -pieceSize * 0.5, pieceSize, pieceSize);
+        c.drawImage(piece.img[order[1]], -pieceSize * 0.5, -pieceSize * 0.5, pieceSize, pieceSize);
+        c.restore();
+    }
+
+    // Check that all pieces are in the locked state
+    function checkWinScenario() {
+        if (pieces.every(p => p.status === STATUS.lock)) {
+            winScreen.style.display = 'block';
+        }    
+    }
+
+    return { start: draw, kill: () => { forceKill = true; } };
+}
+
+// Art -------------------------------------------------------------------------
+// Adapted from: https://github.com/mattdesl/color-wander
+
+function lerp(v0, v1, t) {
+    return v0*(1-t)+v1*t
+}
+
+function clamp(value, min, max) {
+    return min < max
+      ? (value < min ? min : value > max ? max : value)
+      : (value < max ? max : value > min ? min : value)
+}
+
+function vec2_add(out, a, b) {
+    out[0] = a[0] + b[0]
+    out[1] = a[1] + b[1]
+    return out
+}
+
+function vec2_normalize(out, a) {
+    var x = a[0],
+        y = a[1]
+    var len = x*x + y*y
+    if (len > 0) {
+        //TODO: evaluate use of glm_invsqrt here?
+        len = 1 / Math.sqrt(len)
+        out[0] = a[0] * len
+        out[1] = a[1] * len
+    }
+    return out
+}
+
+function vec2_scale(out, a, b) {
+    out[0] = a[0] * b
+    out[1] = a[1] * b
+    return out
+}
+
+function renderArt(opt) {
+  var ctx = opt.context;
+  var dpr = 10;
+  var canvas = ctx.canvas;
+  var width = canvas.width;
+  var height = canvas.height;
+  var count = 150 + conf.w * conf.h;
+  var fill = `hsla(${Math.random()*255},60%, 90%, 0.05)`;
+  // white, 2 brights, 1 medium, 2 darks
+  var palette = [
+      '#fff',
+      `hsl(${Math.random()*255},90%, 75%)`,
+      `hsl(${Math.random()*255},90%, 75%)`,
+      `hsl(${Math.random()*255},60%, 50%)`,
+      `hsl(${Math.random()*255},30%, 25%)`,
+      `hsl(${Math.random()*255},30%, 25%)`,
+    ];
+
+  var maxRadius = 20 + conf.w * conf.h;
+  var startArea = 0.5;
+
+  var time = 0;
+  var particles = Array.from(new Array(count)).map(() => resetParticle());
+
+  ctx.fillStyle = palette[0];
+  ctx.fillRect(0,0,width, height)
+
+  function step (dt) {
+    time += dt;
+    ctx.fillStyle=fill;
+    ctx.fillRect(0,0,width, height);
+    particles.forEach((p, i) => {
+      var x = p.position[0];
+      var y = p.position[1];
+
+      var fx = clamp(Math.round(x), 0, canvas.width - 1);
+      var fy = clamp(Math.round(y), 0, canvas.height - 1);
+      var heightValue = 1;
+
+      //p.angle *= (Math.random() -.5);
+      var speed = p.speed + lerp(0.0, 2, 1 - heightValue);
+      vec2_add(p.velocity, p.velocity, [ Math.cos(p.angle), Math.sin(p.angle) ]);
+      vec2_normalize(p.velocity, p.velocity);
+      var move = vec2_scale([], p.velocity, speed);
+      vec2_add(p.position, p.position, move);
+
+      var r = p.radius * lerp(0.01, 1.0, heightValue);
+      ctx.beginPath();
+      ctx.lineTo(x, y);
+      ctx.lineTo(p.position[0], p.position[1]);
+      ctx.lineWidth = r * (p.time / p.duration);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = p.color;
+
+      // ctx.strokeStyle = colorStyle(rgb.map(x => x * 255));
+      ctx.stroke();
+
+      p.time += dt;
+      if (p.time > p.duration) {
+        resetParticle(p);
+      }
+    });
+  }
+
+  function resetParticle (p) {
+    p = p || {};
+    var scale = Math.min(width, height) / 2;
+    p.position = randomSphere([], rollRange(0, scale * startArea));
+    p.position[0] += width / 2;
+    p.position[1] += height / 2;
+    p.radius = rollRange(0.01, maxRadius);
+    p.duration = rollRange(1, 600);
+    p.time = rollRange(0, p.duration);
+    p.velocity = [ rollRange(-1, 1), rollRange(-1, 1) ];
+    p.speed = rollRange(0.5, 2) * dpr;
+    p.angle = rollRotation();
+    
+    // Note: We actually include the background color here.
+    // This means some strokes may seem to "erase" the other
+    // colours, which can add a nice effect.
+    p.color = palette[Math.floor(rollRange(0, palette.length))];
+    return p;
+  }
+
+  function randomSphere (out, scale) {
+    scale = scale || 1.0;
+    var r = Math.random() * 2.0 * Math.PI;
+    out[0] = Math.cos(r) * scale;
+    out[1] = Math.sin(r) * scale;
+    return out;
+  }
+
+  while (time < 30 + conf.w * conf.h) step(1);
+};
+
+</script>
